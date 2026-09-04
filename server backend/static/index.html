@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Suraksha Live Dashboard</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>🛡️ Suraksha — Live Voice Dashboard</h1>
+    <div id="state-badge" class="badge idle">IDLE</div>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>Live Transcription</h2>
+      <div id="live-text">Waiting for a session…</div>
+    </section>
+
+    <section class="panel">
+      <h2>Metrics</h2>
+      <div id="metrics">
+        <div>Confidence: <span id="confidence">--</span></div>
+        <div>Last session ID: <span id="session-id">--</span></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Recent Sessions</h2>
+      <table id="log-table">
+        <thead>
+          <tr>
+            <th>Time</th><th>Result</th><th>Confidence</th><th>Text</th><th>Duration (ms)</th><th>End Reason</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

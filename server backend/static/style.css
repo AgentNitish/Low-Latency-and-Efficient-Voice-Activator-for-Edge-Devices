@@ -1,0 +1,46 @@
+body {
+  font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+  background: #0f172a;
+  color: #e2e8f0;
+  margin: 0;
+  padding: 24px;
+}
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+h1 { font-size: 20px; margin: 0; }
+.badge {
+  padding: 6px 16px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+}
+.badge.idle { background: #334155; color: #94a3b8; }
+.badge.listening { background: #1e3a8a; color: #93c5fd; }
+.badge.streaming { background: #166534; color: #86efac; }
+.badge.rejected { background: #7f1d1d; color: #fca5a5; }
+
+main {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.panel {
+  background: #1e293b;
+  border-radius: 12px;
+  padding: 16px 20px;
+  grid-column: span 1;
+}
+.panel:last-child { grid-column: span 2; }
+h2 { font-size: 14px; text-transform: uppercase; color: #94a3b8; margin: 0 0 12px; }
+#live-text {
+  font-size: 20px;
+  min-height: 60px;
+}
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #334155; }
+th { color: #94a3b8; font-weight: 500; }
