@@ -1,122 +1,120 @@
-"""
-SURAKSHA BACKEND SERVER
-========================
-This ONE file does everything Module 4 needs:
-  1. Accepts audio from the ESP32 (or our test simulator) over WebSocket
-  2. Runs a "Stage-2" wake-word double-check
-  3. Feeds live audio into Vosk (offline speech-to-text)
-  4. Sends live captions + status to a browser dashboard
-  5. Logs every session to a CSV file for reporting
-
-You do NOT need to understand every line. Read the comments -
-they explain WHAT each part does and WHY.
-"""
-
 import asyncio
+import csv
 import json
 import os
+import tempfile
 import time
 import uuid
+import wave
 
 import pandas as pd
+import whisper
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-# Vosk is optional at import-time so the dashboard still runs even if you
-# haven't downloaded the speech model yet (see README "Get the ASR model").
-try:
-    from vosk import Model, KaldiRecognizer
-    VOSK_AVAILABLE = True
-except ImportError:
-    VOSK_AVAILABLE = False
-
-# -------------------------------------------------------------------
-# CONFIG - change these if needed
-# -------------------------------------------------------------------
-MODEL_PATH = "models/vosk-model-small-en-us-0.15"   # folder you download
+WHISPER_MODEL_NAME = "base.en"
 LOG_FILE = "logs/session_logs.csv"
-PRE_ROLL_BYTES = 16000          # 500ms of 16kHz 16-bit mono audio
-VERIFY_THRESHOLD = 0.70         # confidence needed to accept the wake word
+PRE_ROLL_BYTES = 16000
 SAMPLE_RATE = 16000
+CHANNELS = 1
+SAMPLE_WIDTH = 2
+
+CSV_HEADERS = [
+    "session_id", "timestamp", "verification_result",
+    "confidence_score", "transcribed_text", "duration_ms",
+    "termination_reason"
+]
 
 os.makedirs("logs", exist_ok=True)
-os.makedirs("models", exist_ok=True)
 
-# Create the CSV log file with headers if it doesn't exist yet
 if not os.path.exists(LOG_FILE):
-    pd.DataFrame(columns=[
-        "session_id", "timestamp", "verification_result",
-        "confidence_score", "transcribed_text", "duration_ms",
-        "termination_reason"
-    ]).to_csv(LOG_FILE, index=False)
+    with open(LOG_FILE, "w", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerow(CSV_HEADERS)
 
-# Load the ASR model ONCE when the server starts (loading it per-request
-# would be very slow)
-asr_model = None
-if VOSK_AVAILABLE and os.path.isdir(MODEL_PATH):
-    print(f"[INIT] Loading Vosk model from {MODEL_PATH} ...")
-    asr_model = Model(MODEL_PATH)
-    print("[INIT] ASR model ready.")
-else:
-    print("[INIT] WARNING: No Vosk model found yet at", MODEL_PATH)
-    print("[INIT] The server will still run, but transcription will be skipped.")
-    print("[INIT] See README.md -> 'Get the free speech model' to fix this.")
+print(f"[INIT] Loading Whisper model: {WHISPER_MODEL_NAME} ...")
+whisper_model = whisper.load_model(WHISPER_MODEL_NAME)
+print("[INIT] Whisper model ready.")
 
 app = FastAPI(title="Suraksha Backend")
-
-# A list of every browser dashboard currently watching, so we can push
-# live updates to all of them at once.
-dashboard_clients: list[WebSocket] = []
+dashboard_clients: set[WebSocket] = set()
 
 
 async def broadcast_to_dashboard(message: dict):
-    """Send a status/telemetry update to every connected browser tab."""
-    dead = []
-    for client in dashboard_clients:
+    if not dashboard_clients:
+        return
+
+    async def _send(client: WebSocket):
         try:
             await client.send_json(message)
+            return None
         except Exception:
-            dead.append(client)
-    for d in dead:
-        dashboard_clients.remove(d)
+            return client
+
+    results = await asyncio.gather(
+        *[_send(c) for c in list(dashboard_clients)],
+        return_exceptions=True
+    )
+    for result in results:
+        if isinstance(result, WebSocket):
+            dashboard_clients.discard(result)
 
 
 def verify_stage_2(pre_roll_pcm: bytes) -> tuple[bool, float]:
     """
-    STAGE-2 VERIFICATION (placeholder)
-    -----------------------------------
-    In the full project, Module 1 (the ML teammate) gives you a trained
-    model that checks "did this really sound like the wake word?".
-
-    Until that model is ready, this placeholder ALWAYS says yes with a
-    fixed confidence score, so you can build and test everything else
-    right now without waiting on anyone.
-
-    When the real model is ready, replace the inside of this function
-    with the real prediction call - the rest of the server doesn't
-    need to change at all.
+    Existing Stage-2 placeholder.
+    Replace only this function later when your real wake-word ML model is ready.
     """
     return True, 0.94
 
 
-def log_session(entry: dict):
-    """Append one row to the CSV log file."""
-    pd.DataFrame([entry]).to_csv(LOG_FILE, mode="a", header=False, index=False)
+def transcribe_audio_sync(pcm_audio: bytes) -> str:
+    """Convert raw 16 kHz / 16-bit / mono PCM to WAV and transcribe with Whisper."""
+    if not pcm_audio:
+        return ""
+
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp:
+            temp_path = temp.name
+
+        with wave.open(temp_path, "wb") as wf:
+            wf.setnchannels(CHANNELS)
+            wf.setsampwidth(SAMPLE_WIDTH)
+            wf.setframerate(SAMPLE_RATE)
+            wf.writeframes(pcm_audio)
+
+        print("[WHISPER] Transcribing complete audio...")
+        result = whisper_model.transcribe(
+            temp_path,
+            language="en",
+            fp16=False,
+            temperature=0,
+            condition_on_previous_text=False,
+        )
+        return result.get("text", "").strip()
+
+    except Exception as e:
+        print(f"[WHISPER ERROR] {e}")
+        return ""
+
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
 
-def transcribe_setup():
-    """Create a fresh recognizer for one session (or None if no model)."""
-    if asr_model is None:
-        return None
-    rec = KaldiRecognizer(asr_model, SAMPLE_RATE)
-    rec.SetWords(True)
-    return rec
+def _append_log_sync(entry: dict):
+    with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerow([entry[h] for h in CSV_HEADERS])
 
 
-# ---------------------------------------------------------------------
-# ENDPOINT 1: The ESP32 (or the test simulator) connects here
-# ---------------------------------------------------------------------
+async def log_session(entry: dict):
+    await asyncio.to_thread(_append_log_sync, entry)
+
+
 @app.websocket("/ws/esp32")
 async def handle_esp32(websocket: WebSocket):
     await websocket.accept()
@@ -125,82 +123,92 @@ async def handle_esp32(websocket: WebSocket):
     start_time = time.time()
     timestamp_str = time.strftime("%Y-%m-%d %H:%M:%S")
 
-    recognizer = transcribe_setup()
     is_verified = False
     pre_roll_buffer = bytearray()
+    session_audio_buffer = bytearray()
     final_text = ""
     termination_reason = "UNKNOWN"
     confidence = 0.0
 
     print(f"\n[CONNECT] Node connected. Session: {session_id}")
-    await broadcast_to_dashboard({"event": "state", "state": "LISTENING", "session_id": session_id})
+    await broadcast_to_dashboard({
+        "event": "state",
+        "state": "LISTENING",
+        "session_id": session_id
+    })
 
     try:
         while True:
             message = await websocket.receive()
 
-            # --- Client closed the connection ---
             if message.get("type") == "websocket.disconnect":
                 raise WebSocketDisconnect()
 
-            # --- Binary audio frame ---
             if "bytes" in message and message["bytes"] is not None:
                 chunk = message["bytes"]
 
                 if not is_verified:
-                    # Phase A: collect 500ms, then verify the wake word
                     pre_roll_buffer.extend(chunk)
+
                     if len(pre_roll_buffer) >= PRE_ROLL_BYTES:
-                        verified, confidence = verify_stage_2(bytes(pre_roll_buffer[:PRE_ROLL_BYTES]))
+                        pcm_sample = bytes(pre_roll_buffer[:PRE_ROLL_BYTES])
+                        verified, confidence = await asyncio.to_thread(
+                            verify_stage_2, pcm_sample
+                        )
+
                         if verified:
-                            print(f"[{session_id}] Verified (score {confidence:.2f})")
+                            print(
+                                f"[{session_id}] Verified "
+                                f"(score {confidence:.2f})"
+                            )
                             await websocket.send_json({"status": "VERIFIED"})
                             await broadcast_to_dashboard({
-                                "event": "state", "state": "STREAMING",
-                                "session_id": session_id, "confidence": confidence
+                                "event": "state",
+                                "state": "STREAMING",
+                                "session_id": session_id,
+                                "confidence": confidence
                             })
+
                             is_verified = True
-                            if recognizer:
-                                recognizer.AcceptWaveform(bytes(pre_roll_buffer))
+
+                            # Keep the pre-roll because it may contain the
+                            # beginning of the user's spoken sentence.
+                            session_audio_buffer.extend(pre_roll_buffer)
+                            pre_roll_buffer.clear()
+
                         else:
-                            print(f"[{session_id}] Rejected (score {confidence:.2f})")
+                            print(
+                                f"[{session_id}] Rejected "
+                                f"(score {confidence:.2f})"
+                            )
                             await websocket.send_json({"status": "ABORT"})
                             await broadcast_to_dashboard({
-                                "event": "state", "state": "REJECTED", "session_id": session_id
+                                "event": "state",
+                                "state": "REJECTED",
+                                "session_id": session_id
                             })
                             termination_reason = "SERVER_ABORT"
                             break
-                else:
-                    # Phase B: live streaming + transcription
-                    if recognizer is None:
-                        continue  # no ASR model loaded yet, just skip
-                    if recognizer.AcceptWaveform(chunk):
-                        result = json.loads(recognizer.Result())
-                        final_text = result.get("text", "")
-                        print(f"[{session_id}] Final: \"{final_text}\"")
-                        await websocket.send_json({"action": "STOP"})
-                        await broadcast_to_dashboard({
-                            "event": "final_text", "session_id": session_id, "text": final_text
-                        })
-                        termination_reason = "SERVER_ENDPOINT"
-                        break
-                    else:
-                        partial = json.loads(recognizer.PartialResult())
-                        if partial.get("partial"):
-                            await broadcast_to_dashboard({
-                                "event": "partial_text", "session_id": session_id,
-                                "text": partial["partial"]
-                            })
 
-            # --- Text control frame (JSON) ---
+                else:
+                    # Whisper transcription happens when the session ends.
+                    # Collect every verified audio chunk here.
+                    session_audio_buffer.extend(chunk)
+
             elif "text" in message and message["text"] is not None:
-                data = json.loads(message["text"])
+                try:
+                    data = json.loads(message["text"])
+                except json.JSONDecodeError:
+                    continue
+
                 if data.get("event") == "TIMEOUT":
-                    print(f"[{session_id}] Client hard-timeout.")
-                    if recognizer:
-                        result = json.loads(recognizer.FinalResult())
-                        final_text = result.get("text", "")
+                    print(f"[{session_id}] Client finished sending audio.")
                     termination_reason = "CLIENT_TIMEOUT"
+                    break
+
+                if data.get("event") == "END":
+                    print(f"[{session_id}] Client sent END event.")
+                    termination_reason = "CLIENT_END"
                     break
 
     except WebSocketDisconnect:
@@ -209,40 +217,74 @@ async def handle_esp32(websocket: WebSocket):
             termination_reason = "CLIENT_DISCONNECT"
 
     finally:
+        # IMPORTANT: Whisper transcribes the complete audio once the
+        # simulator/ESP32 has finished or disconnected.
+        if is_verified and session_audio_buffer:
+            print(
+                f"[{session_id}] Audio received: "
+                f"{len(session_audio_buffer)} bytes"
+            )
+
+            final_text = await asyncio.to_thread(
+                transcribe_audio_sync,
+                bytes(session_audio_buffer)
+            )
+
+            print(f'[{session_id}] Whisper Final: "{final_text}"')
+
+            await broadcast_to_dashboard({
+                "event": "final_text",
+                "session_id": session_id,
+                "text": final_text
+            })
+        else:
+            print(f"[{session_id}] No verified audio available for transcription.")
+
         duration_ms = int((time.time() - start_time) * 1000)
+
         entry = {
             "session_id": session_id,
             "timestamp": timestamp_str,
-            "verification_result": "TRUE_POSITIVE" if is_verified else "FALSE_POSITIVE",
+            "verification_result": (
+                "TRUE_POSITIVE" if is_verified else "FALSE_POSITIVE"
+            ),
             "confidence_score": confidence,
             "transcribed_text": final_text,
             "duration_ms": duration_ms,
             "termination_reason": termination_reason,
         }
-        log_session(entry)
-        await broadcast_to_dashboard({"event": "state", "state": "IDLE", "session_id": session_id})
-        await broadcast_to_dashboard({"event": "log_row", "row": entry})
-        print(f"[{session_id}] Logged. Duration {duration_ms}ms | {entry['verification_result']}")
+
+        await log_session(entry)
+
+        await broadcast_to_dashboard({
+            "event": "state",
+            "state": "IDLE",
+            "session_id": session_id
+        })
+
+        await broadcast_to_dashboard({
+            "event": "log_row",
+            "row": entry
+        })
+
+        print(
+            f"[{session_id}] Logged. Duration {duration_ms}ms | "
+            f"{entry['verification_result']}"
+        )
 
 
-# ---------------------------------------------------------------------
-# ENDPOINT 2: The browser dashboard connects here for live updates
-# ---------------------------------------------------------------------
 @app.websocket("/ws/dashboard")
 async def handle_dashboard(websocket: WebSocket):
     await websocket.accept()
-    dashboard_clients.append(websocket)
+    dashboard_clients.add(websocket)
+
     try:
         while True:
-            await websocket.receive_text()  # dashboard doesn't send us anything meaningful
+            await websocket.receive_text()
     except WebSocketDisconnect:
-        if websocket in dashboard_clients:
-            dashboard_clients.remove(websocket)
+        dashboard_clients.discard(websocket)
 
 
-# ---------------------------------------------------------------------
-# Serve the dashboard webpage itself
-# ---------------------------------------------------------------------
 @app.get("/")
 async def root():
     return FileResponse("static/index.html")
@@ -250,11 +292,14 @@ async def root():
 
 @app.get("/api/recent_logs")
 async def recent_logs():
-    """Used by the dashboard to show the last 10 sessions on page load."""
     if not os.path.exists(LOG_FILE):
         return []
-    df = pd.read_csv(LOG_FILE).fillna("")
-    return df.tail(10).to_dict(orient="records")
+
+    def _read_recent():
+        df = pd.read_csv(LOG_FILE).fillna("")
+        return df.tail(10).to_dict(orient="records")
+
+    return await asyncio.to_thread(_read_recent)
 
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -262,6 +307,10 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 if __name__ == "__main__":
     import uvicorn
+
     print("[RUNNING] Open http://localhost:8000 in your browser")
-    print("[RUNNING] ESP32 (or simulator) should connect to ws://<this-computer-ip>:8000/ws/esp32")
+    print(
+        "[RUNNING] ESP32 (or simulator) should connect to "
+        "ws://<this-computer-ip>:8000/ws/esp32"
+    )
     uvicorn.run(app, host="0.0.0.0", port=8000)
