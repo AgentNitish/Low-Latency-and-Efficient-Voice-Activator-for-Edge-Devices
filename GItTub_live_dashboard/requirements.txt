@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+websockets
+pandas
+openai-whisper
+torch

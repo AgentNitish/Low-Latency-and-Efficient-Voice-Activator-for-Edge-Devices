@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GItTub Live Dashboard</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">GITTUB</p>
+        <h1>Live Voice Dashboard</h1>
+      </div>
+      <div id="state-badge" class="badge idle"><span></span>IDLE</div>
+    </header>
+
+    <main class="dashboard">
+      <section class="panel live-panel">
+        <h2>Live Transcription</h2>
+        <div id="live-text">Waiting for a session…</div>
+      </section>
+
+      <section class="panel metrics-panel">
+        <h2>Metrics</h2>
+        <div class="metric-line">Confidence: <strong id="confidence">--</strong></div>
+        <div class="metric-line">Last session ID: <strong id="session-id">--</strong></div>
+      </section>
+
+      <section class="panel sessions-panel">
+        <h2>Recent Sessions</h2>
+        <div class="table-wrap">
+          <table id="log-table">
+            <thead>
+              <tr>
+                <th>Time</th><th>Result</th><th>Confidence</th>
+                <th>Text</th><th>Duration (ms)</th><th>End Reason</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="live-overlay" class="overlay" aria-hidden="true">
+    <div class="live-modal">
+      <div class="modal-head">
+        <div class="live-label"><i></i> LIVE</div>
+        <button id="close-live" aria-label="Close">×</button>
+      </div>
+      <div id="popup-text" class="popup-text">Listening…</div>
+      <div class="wave" aria-label="Audio activity">
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span>
+      </div>
+      <div class="listening">Listening...</div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"><span>✓</span><span id="toast-text"></span></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
