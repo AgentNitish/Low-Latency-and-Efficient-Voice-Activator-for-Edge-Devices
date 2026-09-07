@@ -1,8 +1,5 @@
 # Suraksha Backend — Your Module 4 (Already Built ✅)
 
-I already built and tested this for you. It works right now. You just
-need to run it and add the free speech-recognition model.
-
 ---
 
 ## What's inside this folder
