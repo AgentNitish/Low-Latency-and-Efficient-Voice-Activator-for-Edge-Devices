@@ -1,0 +1,19 @@
+{
+    "folders": [
+        {
+            "name": "ESP32-S3 Firmware",
+            "path": "esp32s3_audio_node"
+        },
+        {
+            "name": "Python Dashboard & Server",
+            "path": "GItTub_live_dashboard"
+        },
+        {
+            "name": "Root Repository",
+            "path": "."
+        }
+    ],
+    "settings": {
+        "cmake.sourceDirectory": "${workspaceFolder:ESP32-S3 Firmware}"
+    }
+}
